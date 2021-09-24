@@ -1,0 +1,168 @@
+<body style="margin: 0"></body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.17.1/matter.min.js"></script>
+<script src="https://unpkg.com/@logue/reverb@0.4.5/bin/reverb.min.js"></script>
+<script>
+const G = 0.3
+
+const audioContext = new AudioContext()
+
+const limiter = audioContext.createDynamicsCompressor();
+limiter.threshold.value = 0.0;
+limiter.knee.value = 0.0;
+limiter.ratio.value = 20.0;
+limiter.attack.value = 0.005;
+limiter.release.value = 0.050;
+
+const reverb = new Reverb.default(audioContext, { mix: 1, decay: 100, time: 50, filterFreq: 5500, filterQ: 10 })
+
+const filter = audioContext.createBiquadFilter()
+filter.frequency.setValueAtTime(0.1, audioContext.currentTime)
+filter.frequency.exponentialRampToValueAtTime(22000, audioContext.currentTime + 5)
+
+
+limiter.connect(filter)
+
+reverb.connect(filter).connect(audioContext.destination)
+
+const cMinorPentatonicOctave = [261.63, 311.13, 349.23, 392.00, 466.16]
+const cMinorPentatonic = Array.from({ length: 4 }, (_, i) => cMinorPentatonicOctave.map(note => note * 2 ** (i - 2))).flat()
+const quantize = note => {
+	for(const scaleNote of cMinorPentatonic) {
+		if(scaleNote > note) return scaleNote
+	}
+
+	return cMinorPentatonic[cMinorPentatonic.length - 1]
+}
+const mapRange = (fromStart, fromEnd, toStart, toEnd) => n => toStart + n * (toEnd - toStart) / (fromEnd - fromStart)
+const massToFrequency = mapRange(0, 0.75, cMinorPentatonic[cMinorPentatonic.length - 1], cMinorPentatonic[0])
+const frequencyToOpacity = mapRange(0, 22000, 0, 0.5)
+
+const maxSounds = 50
+let sounds = 0
+
+function playSound(planet) {
+	if(sounds >= maxSounds) return
+
+	const oscillator = audioContext.createOscillator()
+	oscillator.type = 'square'
+	oscillator.frequency.setValueAtTime(quantize(massToFrequency(planet.mass)), audioContext.currentTime)
+
+	const decay = Math.sqrt(planet.mass)
+
+	const amp = audioContext.createGain()
+	amp.gain.setValueAtTime(0.02, audioContext.currentTime)
+	amp.gain.linearRampToValueAtTime(0, audioContext.currentTime + decay)
+
+	const filter = audioContext.createBiquadFilter()
+	filter.type = 'lowpass'
+	filter.frequency.setValueAtTime(2000, audioContext.currentTime)
+	filter.frequency.linearRampToValueAtTime(0, audioContext.currentTime + decay)
+
+	const panner = new PannerNode(audioContext, {
+		distanceModel: 'linear',
+		positionX: planet.position.x - window.innerWidth / 2,
+		positionY: planet.position.y - window.innerHeight / 2,
+		positionZ: 0,
+	})
+
+	oscillator.connect(filter).connect(amp).connect(panner).connect(limiter)
+	oscillator.start(audioContext.currentTime)
+	oscillator.stop(audioContext.currentTime + decay)
+
+	sounds++
+	oscillator.addEventListener('ended', () => {
+		sounds = Math.max(0, sounds - 1)
+	})
+}
+
+const engine = Matter.Engine.create({
+	gravity: { scale: 0 },
+	timing: { timeScale: 0.1 }
+});
+
+
+const render = Matter.Render.create({
+    element: document.body,
+    engine,
+	 options: {
+		height: window.innerHeight,
+		width: window.innerWidth,
+		wireframes: false
+	 }
+});
+
+const planets = Array.from({ length: 500 }, () => {
+	const x = Math.random() * window.innerWidth
+	const y = Math.random() * window.innerWidth // yes width, put them in a square
+	const planet = Math.random() < 0.5 ? Matter.Bodies.circle(
+		x,
+		y,
+		Math.random() * 20 + 3,
+		{ restitution: 1, frictionAir: 0, friction: 0, render: {opacity: 0.8} }
+	) : Matter.Bodies.polygon(
+		x,
+		y,
+		Math.round(Math.random() * 5) + 3,
+		Math.random() * 20 + 3,
+		{ restitution: 1, frictionAir: 0, friction: 0, render: {opacity: 0.8} }
+	)
+
+	Matter.Body.setVelocity(planet, Matter.Vector.mult(Matter.Vector.perp({
+		x: x - window.innerWidth / 2,
+		y: y - window.innerHeight / 2,
+	}, Math.random() > 0.8), 0.003))
+
+	Matter.Body.setAngularVelocity(planet, Math.random() - 0.5)
+
+	return planet
+})
+
+const sun = Matter.Bodies.circle(window.innerWidth / 2, window.innerHeight / 2, 80, {restitution: 1, frictionAir: 0, friction: 0, render: {opacity: 0.8} })
+const pin = Matter.Constraint.create({
+	length: 0,
+	stiffness: 0.8,
+	bodyA: sun,
+	pointB: {
+		x: window.innerWidth / 2,
+		y: window.innerHeight / 2,
+	},
+	render: { visible: false }
+})
+
+planets.push(sun)
+
+const mouse = Matter.Mouse.create(render.canvas)
+const mouseConstraint = Matter.MouseConstraint.create(engine, { mouse })
+
+Matter.Composite.add(engine.world, mouseConstraint)
+Matter.Composite.add(engine.world, planets)
+Matter.Composite.add(engine.world, pin)
+
+Matter.Events.on(engine, 'afterUpdate', () => {
+	for(const planet of planets) {
+		for(const otherPlanet of planets) if(planet !== otherPlanet) {
+			const difference = Matter.Vector.sub(planet.position, otherPlanet.position)
+			const magnitude = G * planet.mass * otherPlanet.mass / Matter.Vector.magnitudeSquared(difference)
+			const force = Matter.Vector.mult(Matter.Vector.normalise(difference), -magnitude)
+			Matter.Body.applyForce(planet, planet.position, force)
+		}
+
+		if(planet.render.opacity > 0.5) {
+			planet.render.opacity -= engine.timing.timeScale / 10
+		}
+	}
+})
+
+Matter.Events.on(engine, 'collisionStart', ({pairs}) => {
+	for(const { bodyA, bodyB } of pairs) {
+		bodyA.render.opacity = bodyB.render.opacity = 1
+		playSound(bodyA)
+		playSound(bodyB)
+	}
+})
+
+
+Matter.Render.run(render);
+const runner = Matter.Runner.create();
+Matter.Runner.run(runner, engine);
+</script>
