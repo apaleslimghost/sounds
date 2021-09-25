@@ -1,7 +1,9 @@
+<meta charset="utf8">
 <body style="margin: 0"></body>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.17.1/matter.min.js"></script>
-<script src="https://unpkg.com/@logue/reverb@0.4.5/bin/reverb.min.js"></script>
-<script>
+<script type="module">
+import Matter from 'https://cdn.skypack.dev/matter-js@0.17.1'
+import Reverb from 'https://cdn.skypack.dev/soundbank-reverb@1.1.2'
+
 const G = 0.3
 
 const audioContext = new AudioContext()
@@ -13,16 +15,13 @@ limiter.ratio.value = 20.0;
 limiter.attack.value = 0.005;
 limiter.release.value = 0.050;
 
-const reverb = new Reverb.default(audioContext, { mix: 1, decay: 100, time: 50, filterFreq: 5500, filterQ: 10 })
+const reverb = new Reverb(audioContext)
 
 const filter = audioContext.createBiquadFilter()
 filter.frequency.setValueAtTime(0.1, audioContext.currentTime)
 filter.frequency.exponentialRampToValueAtTime(22000, audioContext.currentTime + 5)
 
-
-limiter.connect(filter)
-
-reverb.connect(filter).connect(audioContext.destination)
+limiter.connect(filter).connect(reverb).connect(audioContext.destination)
 
 const cMinorPentatonicOctave = [261.63, 311.13, 349.23, 392.00, 466.16]
 const cMinorPentatonic = Array.from({ length: 4 }, (_, i) => cMinorPentatonicOctave.map(note => note * 2 ** (i - 2))).flat()
