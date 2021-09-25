@@ -46,10 +46,6 @@ document.addEventListener("click", event => {
 	}
 })
 
-audioContext.resume().then(() => {
-	playButtonElement.style.display = "none"
-})
-
 const G = 0.3
 
 const limiter = audioContext.createDynamicsCompressor();
@@ -63,7 +59,11 @@ const reverb = new Reverb(audioContext)
 
 const filter = audioContext.createBiquadFilter()
 filter.frequency.setValueAtTime(0.1, audioContext.currentTime)
-filter.frequency.exponentialRampToValueAtTime(22000, audioContext.currentTime + 5)
+
+audioContext.resume().then(() => {
+	playButtonElement.style.display = "none"
+	filter.frequency.exponentialRampToValueAtTime(22000, audioContext.currentTime + 5)
+})
 
 limiter.connect(filter).connect(reverb).connect(audioContext.destination)
 
