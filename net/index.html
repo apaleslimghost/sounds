@@ -1,0 +1,162 @@
+<body style="margin: 0"></body>
+<script type="module">
+import Delaunator from 'https://cdn.skypack.dev/delaunator@5.0.0'
+import Matter from 'https://cdn.skypack.dev/matter-js@0.17.1'
+import PoissonDiskSampling from 'https://cdn.skypack.dev/poisson-disk-sampling@2.2.2'
+import Reverb from 'https://cdn.skypack.dev/soundbank-reverb@1.1.2'
+
+const audioContext = new AudioContext()
+
+const reverb = new Reverb(audioContext)
+reverb.connect(audioContext.destination)
+reverb.wet.setValueAtTime(0, audioContext.currentTime)
+reverb.wet.linearRampToValueAtTime(1, audioContext.currentTime + 15)
+
+const am11Chord = [55, 110, 130.81, 164.81, 196, 220, 261.63, 329.63, 392, 493.88, 587.33]
+
+function createOscillator(body, i) {
+	const freq = am11Chord[i]
+
+	const oscillator = audioContext.createOscillator()
+	oscillator.frequency.setValueAtTime(freq, audioContext.currentTime)
+	oscillator.type = 'sawtooth'
+
+	const amp = audioContext.createGain()
+	amp.gain.setValueAtTime(0, audioContext.currentTime)
+	amp.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 5)
+
+	const filter = audioContext.createBiquadFilter()
+	filter.frequency.setValueAtTime(1000, audioContext.currentTime)
+
+	const panner = new PannerNode(audioContext, {
+		distanceModel: 'linear',
+		positionX: body.position.x - window.innerWidth / 2,
+		positionY: body.position.y - window.innerHeight / 2,
+		positionZ: 0,
+	})
+
+	oscillator.connect(filter).connect(amp).connect(reverb)
+	oscillator.start(audioContext.currentTime)
+
+	return filter
+}
+
+const clamp = n => Math.max(0, Math.min(1, n))
+
+const engine = Matter.Engine.create({
+	gravity: { scale: 0 }
+});
+
+const render = Matter.Render.create({
+	element: document.body,
+	engine,
+	options: {
+		height: window.innerHeight,
+		width: window.innerWidth,
+		wireframes: false
+	}
+})
+
+const disk = new PoissonDiskSampling({
+	shape: [window.innerWidth, window.innerHeight],
+	minDistance: 40
+})
+
+const diskPoints = disk.fill()
+
+const points = diskPoints.concat(Array.from({ length: 11 }, (_, i) => [
+	[-40, i * window.innerHeight / 10],
+	[window.innerWidth + 40, i * window.innerHeight / 10],
+]).flat()).concat(Array.from({ length: 10 }, (_, i) => [
+	[i * window.innerWidth / 10, -40],
+	[i * window.innerWidth / 10, window.innerHeight + 40],
+]).flat())
+
+const bodies = points.map(([x, y], i) => (
+	Matter.Bodies.circle( x, y, 5, { isStatic: i >= diskPoints.length } )
+))
+
+const oscillatingBodies = am11Chord.map(() => (
+	bodies[Math.floor(Math.random() * diskPoints.length)]
+))
+
+const filters = oscillatingBodies.map(createOscillator)
+
+for(const body of oscillatingBodies) {
+	body.render.lineWidth = 20
+	body.originalPosition = body.position
+}
+
+Matter.Composite.add(engine.world, bodies)
+
+const { triangles } = Delaunator.from(points)
+
+const constraints = []
+
+for(let i = 0; i < triangles.length; i += 3) {
+	const body1 = bodies[triangles[i]]
+	const body2 = bodies[triangles[i + 1]]
+	const body3 = bodies[triangles[i + 2]]
+
+	constraints.push(
+		Matter.Constraint.create({
+			bodyA: body1,
+			bodyB: body2,
+			length: 20 + Math.random() * 40,
+			stiffness: 0.005,
+			damping: 0,
+			render: {lineWidth: 1, anchors: false, type: 'line', strokeStyle: '#fff3'}
+		}),
+		Matter.Constraint.create({
+			bodyA: body2,
+			bodyB: body3,
+			length: 20 + Math.random() * 40,
+			stiffness: 0.005,
+			damping: 0,
+			render: {lineWidth: 1, anchors: false, type: 'line', strokeStyle: '#fff3'}
+		}),
+		Matter.Constraint.create({
+			bodyA: body3,
+			bodyB: body1,
+			length: 20 + Math.random() * 40,
+			stiffness: 0.005,
+			damping: 0,
+			render: {lineWidth: 1, anchors: false, type: 'line', strokeStyle: '#fff3'}
+		})
+	)
+}
+
+constraints.forEach(c => c.originalLength = c.length)
+Matter.Composite.add(engine.world, constraints)
+
+const mouse = Matter.Mouse.create(render.canvas)
+const mouseConstraint = Matter.MouseConstraint.create(engine, { mouse })
+Matter.Composite.add(engine.world, mouseConstraint)
+
+Matter.Events.on(engine, 'afterUpdate', () => {
+	for(const [i, body] of oscillatingBodies.entries()) {
+		const up = {x: 0, y: -1}
+		const angle = Matter.Vector.angle(body.velocity, up)
+		const sign = Math.sign(angle - Math.PI)
+		const distance = Matter.Vector.magnitude(body.velocity)
+		const frequency = Math.max(100, 1000 + (1000 * (distance ** (1/4)) * sign))
+
+		body.render.opacity = Math.sqrt(clamp(frequency / 1000))
+
+		filters[i].frequency.setValueAtTime(frequency, audioContext.currentTime)
+	}
+})
+
+setInterval(() => {
+	const body = bodies[Math.floor(Math.random() * diskPoints.length)]
+
+	Matter.Body.applyForce(body, body.position, {
+		x: (Math.random() - 0.5) / 30,
+		y: (Math.random() - 0.5) / 30,
+	})
+}, 400)
+
+Matter.Render.run(render);
+const runner = Matter.Runner.create();
+Matter.Runner.run(runner, engine);
+</script>
