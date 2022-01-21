@@ -1,0 +1,151 @@
+<meta charset="utf8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥁</text></svg>">
+<title>Techno</title>
+
+<body style="margin: 0"></body>
+
+<script type="module">
+import startAudio from '../start-audio.js'
+import euclid from 'https://cdn.skypack.dev/euclidean-rhythms@2.0.1'
+
+const { audioContext } = startAudio()
+
+const tempo = 120
+const noteTime = 60 / tempo
+const sixteenthTime = noteTime / 4
+
+async function loadSound(sound) {
+	const response = await fetch(sound)
+	const data = await response.arrayBuffer()
+	const buffer = await audioContext.decodeAudioData(data)
+	return buffer
+}
+
+function playSound(buffer, time = 0) {
+	const source = audioContext.createBufferSource()
+	source.buffer = buffer
+
+	const amp = audioContext.createGain()
+	amp.gain.setValueAtTime(0.7, time)
+
+	source.connect(amp).connect(audioContext.destination)
+	source.start(time)
+	return source
+}
+
+const cMinorPentatonicOctave = [261.63, 311.13, 349.23, 392.00, 466.16]
+const cMinorPentatonic = Array.from({ length: 2 }, (_, i) => cMinorPentatonicOctave.map(note => note * 2 ** (i - 2))).flat()
+
+let currentNote = cMinorPentatonic[0]
+
+function makeDistortionCurve(amount) {
+  var k = typeof amount === 'number' ? amount : 50,
+    n_samples = 44100,
+    curve = new Float32Array(n_samples),
+    deg = Math.PI / 180,
+    i = 0,
+    x;
+  for ( ; i < n_samples; ++i ) {
+    x = i * 2 / n_samples - 1;
+    curve[i] = ( 3 + k ) * x * 20 * deg / ( Math.PI + k * Math.abs(x) );
+  }
+  return curve;
+}
+
+function bassNote(time) {
+	const decay = 1.37
+
+	const oscillator1 = audioContext.createOscillator()
+	oscillator1.type = 'sawtooth'
+	oscillator1.detune.setValueAtTime(-5, time)
+	oscillator1.frequency.setValueAtTime(currentNote, time)
+
+	const oscillator2 = audioContext.createOscillator()
+	oscillator2.type = 'sawtooth'
+	oscillator2.detune.setValueAtTime(5, time)
+	oscillator2.frequency.setValueAtTime(currentNote, time)
+
+	const shaper = audioContext.createWaveShaper()
+	shaper.curve = makeDistortionCurve(400)
+	shaper.oversample = '4x'
+
+	const left = new PannerNode(audioContext, {
+		distanceModel: 'linear',
+		positionX: -1,
+		positionY: 0,
+		positionZ: 0,
+	})
+
+	const right = new PannerNode(audioContext, {
+		distanceModel: 'linear',
+		positionX: 1,
+		positionY: 0,
+		positionZ: 0,
+	})
+
+	if(Math.random() < 0.3) {
+		currentNote = cMinorPentatonic[Math.floor(cMinorPentatonic.length * Math.random())]
+	}
+
+	const filter = audioContext.createBiquadFilter()
+	filter.type = 'lowpass'
+	filter.Q.setValueAtTime(10, time)
+	filter.frequency.setValueAtTime(8000, time)
+	filter.frequency.linearRampToValueAtTime(0, time + decay)
+
+	const amp = audioContext.createGain()
+	amp.gain.setValueAtTime(0.2, time)
+	amp.gain.linearRampToValueAtTime(0, time + decay / 2)
+
+	oscillator1.connect(left).connect(shaper)
+	oscillator2.connect(right).connect(shaper)
+
+	shaper.connect(filter).connect(amp).connect(audioContext.destination)
+
+	oscillator1.start(time)
+	oscillator1.stop(time + decay)
+	oscillator2.start(time)
+	oscillator2.stop(time + decay)
+}
+
+const offset = (n, array) => [...array.slice(-n), ...array.slice(0, -n)]
+
+async function main() {
+	const [kick, clap, hat] = await Promise.all(['kick.mp3', 'clap.mp3', 'hat.mp3'].map(loadSound))
+
+	const barLength = noteTime * 4
+
+	setInterval(() => {
+		const start = audioContext.currentTime
+
+		playSound(kick, start)
+		playSound(kick, start + noteTime)
+		playSound(kick, start + noteTime * 2)
+		playSound(kick, start + noteTime * 3)
+
+		const hats = euclid.getPattern(7, 16)
+		hats.map((beat, index) => {
+			if(beat) {
+				playSound(hat, start + index * sixteenthTime)
+			}
+		})
+
+		const claps = euclid.getPattern(3, 16)
+		claps.map((beat, index) => {
+			if(beat) {
+				playSound(clap, start + index * sixteenthTime)
+			}
+		})
+
+		const bass = euclid.getPattern(13, 16)
+		bass.map((beat, index) => {
+			if(beat) {
+				bassNote(start + index * sixteenthTime)
+			}
+		})
+	}, 1000 * barLength)
+}
+
+main()
+</script>

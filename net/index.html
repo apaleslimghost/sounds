@@ -3,9 +3,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🕸</text></svg>">
 <title>Net</title>
 
-<body style="margin: 0">
-	<button id="play" style="position: absolute; top: 1em; left: 1em">▶️ start audio</button>
-</body>
+<body style="margin: 0"></body>
 
 <script type="module">
 import Delaunator from 'https://cdn.skypack.dev/delaunator@5.0.0'
@@ -13,49 +11,9 @@ import Matter from 'https://cdn.skypack.dev/matter-js@0.17.1'
 import PoissonDiskSampling from 'https://cdn.skypack.dev/poisson-disk-sampling@2.2.2'
 import Reverb from 'https://cdn.skypack.dev/soundbank-reverb@1.1.2'
 
-const playButtonElement = document.querySelector("#play")
-playButtonElement.style.display = "flex"
+import startAudio from '../start-audio.js'
 
-const audioContext = new (window.AudioContext || window.webkitAudioContext)()
-
-let buttonWasShowingAtStart = false
-
-document.addEventListener("touchstart", () => {
-	if (playButtonElement.style.display != "none") {
-		buttonWasShowingAtStart = true
-	}
-
-	audioContext.resume()
-})
-
-let buttonWasShowingAtEnd
-
-document.addEventListener("touchend", event => {
-	if (playButtonElement.style.display != "none" || buttonWasShowingAtStart) {
-		buttonWasShowingAtStart = false
-		buttonWasShowingAtEnd = true
-	}
-
-	audioContext.resume()
-})
-
-document.addEventListener("click", event => {
-	if (
-		playButtonElement.style.display != "none" ||
-		buttonWasShowingAtStart ||
-		buttonWasShowingAtEnd
-	) {
-		event.preventDefault()
-		buttonWasShowingAtStart = false
-		buttonWasShowingAtEnd = false
-
-		audioContext.resume()
-	}
-})
-
-audioContext.resume().then(() => {
-	playButtonElement.style.display = "none"
-})
+const { audioContext } = startAudio()
 
 const reverb = new Reverb(audioContext)
 reverb.connect(audioContext.destination)
